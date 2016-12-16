@@ -291,6 +291,7 @@ sub find_file {
     my $cachepath;
     my $orig_mtime;
     my $cache_mtime;
+    my $cache_fh;
     foreach my $p(@{$self->{path}}) {
         $self->note("  find_file: %s in  %s ...\n", $file, $p) if _DUMP_LOAD;
 
@@ -303,7 +304,7 @@ sub find_file {
             # Because contents of virtual paths include their digest,
             # time-dependent cache verifier makes no sense.
             $orig_mtime   = 0;
-            $cache_mtime  = 0;
+            # $cache_mtime  = 0; this is always overridden by the stat() below
             $cache_prefix = 'HASH';
         }
         else {
@@ -323,8 +324,11 @@ sub find_file {
             $cache_prefix,
             $file . 'c',
         );
-        # stat() will be failed if the cache doesn't exist
-        $cache_mtime = (stat($cachepath))[_ST_MTIME];
+        # use open() to check for existence rather than stat() to avoid
+        # the possibility of open() failing later on
+        if (open $cache_fh, '<:raw', $cachepath){
+            $cache_mtime = (stat($cache_fh))[_ST_MTIME];
+        }
         last;
     }
 
@@ -339,6 +343,7 @@ sub find_file {
         name        => ref($fullpath) ? $file : $fullpath,
         fullpath    => $fullpath,
         cachepath   => $cachepath,
+        cache_fh    => $cache_fh,
 
         orig_mtime  => $orig_mtime,
         cache_mtime => $cache_mtime,
@@ -482,8 +487,17 @@ sub _load_compiled {
     }
 
     my $cachepath = $fi->{cachepath};
-    open my($in), '<:raw', $cachepath
-        or $self->_error("LoadError: Cannot open $cachepath for reading: $!");
+    my $cache_fh = $fi->{cache_fh};
+
+    my $in;
+    if ($cache_fh){
+        $in = $cache_fh;
+    }else{
+        open $in, '<:raw', $cachepath
+            or $self->_error("LoadError: Cannot open $cachepath for reading: $!");
+    }
+
+
 
     my $magic = $self->_magic_token($fi->{fullpath});
     my $data;
